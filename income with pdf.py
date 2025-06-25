@@ -6,6 +6,8 @@ import os
 import logging
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 import torch
+from docx import Document
+
 logging.getLogger("pdfminer").setLevel(logging.ERROR)
 
 # Logging config
@@ -17,6 +19,13 @@ model = AutoModelForSequenceClassification.from_pretrained("ProsusAI/finbert")
 
 # Load summarizer
 summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+
+def extract_project_blocks(text):
+    # Use paragraph-level blocks with some filtering logic
+    blocks = text.split('\n\n')
+    keywords = ["project", "programme", "strategy", "research", "initiative", "campaign", "trial", "funded", "support", "activity"]
+    relevant_blocks = [b.strip() for b in blocks if any(k in b.lower() for k in keywords) and len(b.strip()) > 50]
+    return relevant_blocks
 
 
 def extract_text_from_pdf(file_path):
@@ -258,6 +267,48 @@ def generate_financial_summary(entries):
     print("\n📉 Top Expenditures:")
     for item in expense_items[:5]:
         print(f"  - {item['raw']}: {item['context'][:100]}")
+        
+def save_project_sentences_to_word(sentences, pdf_file_path):
+    base_name = os.path.splitext(os.path.basename(pdf_file_path))[0]
+    folder = os.path.dirname(pdf_file_path)
+    docx_filename = os.path.join(folder, f"{base_name}_project_sentences.docx")
+
+    doc = Document()
+    doc.add_heading("Project-Related Sentences", level=1)
+
+    for i, sentence in enumerate(sentences, 1):
+        doc.add_paragraph(f"{i}. {sentence.strip()}", style="List Number")
+
+    doc.save(docx_filename)
+    logging.info(f"📄 Project sentences saved to: {docx_filename}")
+
+def save_projects_to_word(project_blocks, pdf_file_path):
+    base_name = os.path.splitext(os.path.basename(pdf_file_path))[0]
+    folder = os.path.dirname(pdf_file_path)
+    docx_filename = os.path.join(folder, f"{base_name}_project_summary.docx")
+
+    doc = Document()
+    doc.add_heading("Cancer Research UK – 2021/22 Project Summary", level=1)
+
+    table = doc.add_table(rows=1, cols=4)
+    table.style = 'Table Grid'
+    hdr_cells = table.rows[0].cells
+    hdr_cells[0].text = 'Project / Focus Area'
+    hdr_cells[1].text = 'Details'
+    hdr_cells[2].text = 'Funding (if any)'
+    hdr_cells[3].text = 'Notes / Outcomes'
+
+    for block in project_blocks:
+        row = table.add_row().cells
+        row[0].text = block[:50] + "..." if len(block) > 50 else block  # Title
+        row[1].text = block  # Full content
+        row[2].text = "£..." if "£" in block else "N/A"
+        row[3].text = "Ongoing" if "launch" in block.lower() or "plan" in block.lower() else "Reported"
+
+    doc.save(docx_filename)
+    logging.info(f"📄 Structured project summary saved to: {docx_filename}")
+
+
 
 
 # ------------------ MAIN ------------------
@@ -281,3 +332,7 @@ if __name__ == "__main__":
     # Step 4: Display results and save CSV
     print_summary(top_entries, project_sentences)
     save_to_csv(top_entries, pdf_path)
+    project_blocks = extract_project_blocks(text)
+    save_projects_to_word(project_blocks, pdf_path)
+
+
